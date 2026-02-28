@@ -1,4 +1,5 @@
 import os
+import yaml
 import argparse
 
 import numpy as np
@@ -10,32 +11,41 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import CSVLogger, WandbLogger
 from sklearn.model_selection import train_test_split
 
-from model import LightningWBoson
+from model import LightningWAttention
 from data_module import WBosonDataModule
 import load_data as data
 
-# ====== Hyperparameters constants ======
-BATCH_SIZE = 128
-EPOCHS = 1024
-LEARNING_RATE = 1e-5
-LOSS_WEIGHTS = {
-    "huber": 1.0,
-    "w_mass_mmd0":8.0,
-    "w_mass_mmd1":8.0,
-    "higgs_mass": 0.2,
-    "alpha_mmd": 10.0,
-    "aux_mom_mmd0": 0.0,
-    "aux_mom_mmd1": 0.0,
-}
+# ====== Load config ======
+def load_config(config_path="config.yaml"):
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at: {config_path}")
 
-# ====== main parameters ======
-project_name = "hww_pctransformer_kfold"
-saved_path = f"/root/work/hww_pctransformer/{project_name}"
-data_path = "/root/data/danning_h5/ypeng/mc20_qe_v4_recotruth_merged.h5"
-SEED = 114
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
 
-def main(train=True):
+def main(train=True, args=None):
+    # ---------- load config ----------
+    _cfg = load_config()
 
+    _param = _cfg["parameters"]
+    BATCH_SIZE = _param["batch_size"]
+    EPOCHS = _param["epochs"]
+    if args and args.test:
+        print("Running in test mode, overriding epochs to 2 for quick data module setup.")
+        EPOCHS = 2
+    LEARNING_RATE = _param["learning_rate"]
+    LOSS_WEIGHTS = _param["loss_weights"]
+    ATTN_DIM = _param["attn_dim"]
+    NUM_HEAD = _param["num_head"]
+    NUM_SELF_ATTN = _param["num_self_attn"]
+    NUM_CROSS_ATTN = _param["num_cross_attn"]
+
+    project_name = _cfg["paths"]["project_name"]
+    saved_path = _cfg["paths"]["saved_path"]
+    data_path = _cfg["paths"]["data_path"]
+    SEED = _cfg["seed"]
+    
     # ---------- housekeeping ----------
     if train == True:
         if os.path.exists(saved_path):
@@ -103,12 +113,14 @@ def main(train=True):
 
             input_dim = X.shape[1]
             print(f"Input dimension: {input_dim}")
-            model = LightningWBoson(
+            model = LightningWAttention(
 				input_dim=input_dim,
 				std_mean_train=std_mean_train,
 				std_scale_train=std_scale_train,
 				lr=LEARNING_RATE,
 				loss_weights=LOSS_WEIGHTS,
+                d_model=ATTN_DIM, nhead=NUM_HEAD, 
+                num_self_attn=NUM_SELF_ATTN, num_cross_attn=NUM_CROSS_ATTN
 			)
 
             ckpt = ModelCheckpoint(
@@ -157,9 +169,10 @@ def main(train=True):
 if __name__ == "__main__":
     from time import time
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--wandb', '-w', action='store_true', help='Enable wandb logging and training mode')
+    argparser.add_argument("--wandb", "-w", action="store_true", help="Enable wandb logging and training mode")
+    argparser.add_argument("--test", "-t", action="store_true", help="Run in test mode (no training, just data module setup)")
     args = argparser.parse_args()
     
     t0 = time()
-    main(train=True)
+    main(train=True, args=args)
     print(f"Total time: {time() - t0:.1f} seconds.")

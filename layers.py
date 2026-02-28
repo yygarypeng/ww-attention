@@ -1,19 +1,6 @@
 import torch
 import torch.nn as nn
 
-class WBosonFourVectorLayer(nn.Module):
-    """
-    Compute W four-vectors from leptons and predicted neutrino 3-momenta.
-    """
-    def forward(self, lep0, lep1, nu_3mom):
-        nu0_3, nu1_3 = nu_3mom[..., :3], nu_3mom[..., 3:]
-        # neutrino energies as |p| for (approx) massless
-        nu0_E = torch.sqrt(torch.clamp(torch.sum(nu0_3 ** 2, dim=-1, keepdim=True), min=1e-16))
-        nu1_E = torch.sqrt(torch.clamp(torch.sum(nu1_3 ** 2, dim=-1, keepdim=True), min=1e-16))
-        nu0_4 = torch.cat([nu0_3, nu0_E], dim=-1)
-        nu1_4 = torch.cat([nu1_3, nu1_E], dim=-1)
-        return torch.cat([lep0 + nu0_4, lep1 + nu1_4], dim=-1)
-    
 class Standardization(nn.Module):
     def __init__(self, mean, std, eps=1e-16):
         super().__init__()
@@ -30,7 +17,6 @@ class SelfAttentionBlock(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         self.mha = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
         
-        self.norm2 = nn.LayerNorm(d_model)
         self.ffn = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.SiLU(),
@@ -46,7 +32,7 @@ class SelfAttentionBlock(nn.Module):
         x, _ = self.mha(x, x, x, key_padding_mask=key_padding_mask)
         x = res + x
         
-        x = x + self.ffn(self.norm2(x))
+        x = x + self.ffn(x)
         return x
     
 class CrossAttentionBlock(nn.Module):
@@ -64,11 +50,7 @@ class CrossAttentionBlock(nn.Module):
         self.ffn = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.SiLU(),
-            nn.Linear(d_model, d_model // 4),
-            nn.Dropout(dropout),
-            nn.LayerNorm(d_model // 4),
-            nn.SiLU(),
-            nn.Linear(d_model // 4, d_model),
+            nn.Linear(d_model, d_model),
             nn.Dropout(dropout),
         )
 
@@ -86,3 +68,16 @@ class CrossAttentionBlock(nn.Module):
         # 2. Feed-Forward Phase
         x = x + self.ffn(x)
         return x
+    
+class WBosonFourVectorLayer(nn.Module):
+    """
+    Compute W four-vectors from leptons and predicted neutrino 3-momenta (force massless neutrinos).
+    """
+    def forward(self, lep0, lep1, nu_3mom):
+        nu0_3, nu1_3 = nu_3mom[..., :3], nu_3mom[..., 3:]
+        # neutrino energies as |p| for (approx) massless
+        nu0_E = torch.sqrt(torch.clamp(torch.sum(nu0_3 ** 2, dim=-1, keepdim=True), min=1e-16))
+        nu1_E = torch.sqrt(torch.clamp(torch.sum(nu1_3 ** 2, dim=-1, keepdim=True), min=1e-16))
+        nu0_4 = torch.cat([nu0_3, nu0_E], dim=-1)
+        nu1_4 = torch.cat([nu1_3, nu1_E], dim=-1)
+        return torch.cat([lep0 + nu0_4, lep1 + nu1_4], dim=-1)    

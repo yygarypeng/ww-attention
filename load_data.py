@@ -163,7 +163,6 @@ def load_data(data_path):
     print("Training objects shape:", train_obj.shape)
     print("Target objects shape:", target_obj.shape)
 
-    # After concatenating all categories, add this before the return statement:
     # Remove rows with NaN or infinite values
     valid_train = np.isfinite(train_obj).all(axis=1)
     valid_target = np.isfinite(target_obj).all(axis=1)

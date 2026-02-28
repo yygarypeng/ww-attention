@@ -1,0 +1,21 @@
+parameters:
+  loss_weights:
+    huber: 1.0
+    w_mass_mmd0: 5.0
+    w_mass_mmd1: 5.0
+    higgs_mass: 1.0
+    alpha: 0.0 # TODO: study this hyperparameter
+  batch_size: 256
+  epochs: 1024
+  learning_rate: 1.0e-5
+  attn_dim: 128
+  num_head: 8
+  num_self_attn: 6
+  num_cross_attn: 6
+
+paths:
+  project_name: "hww_pctransformer_kfold"
+  saved_path: "/root/work/hww_pctransformer/hww_pctransformer_kfold"
+  data_path: "/root/data/danning_h5/ypeng/mc20_qe_v4_recotruth_merged.h5"
+
+seed: 114
