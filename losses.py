@@ -39,7 +39,7 @@ def compute_mmd(x, y, bandwidth_range=SIGMA_LST):
     #     print("Tot:", torch.mean(XX + YY - 2. * XY))
     # raise Exception("DEBUG: stop here")
     
-    return XX + YY - 2. * XY
+    return torch.mean(XX + YY - 2. * XY)
 
 
 def invariant_mass(fourvec):
@@ -99,11 +99,13 @@ def alpha_loss(x_batch, y_true, y_pred, w_mass=80.379):
     alpha_true = _alpha_from_p4(true_lep_on, true_neu_on, true_lep_off, true_neu_off)
     alpha_pred = _alpha_from_p4(true_lep_on, pred_neu_on, true_lep_off, pred_neu_off)
 
-    return F.l1_loss(alpha_pred, alpha_true, reduction='none')
+    # return F.l1_loss(alpha_pred, alpha_true, reduction='none')
+    return torch.mean((alpha_pred - alpha_true).abs(), dim=-1)
 
 def mae_loss(y_true, y_pred):
     # do not consider mass targets in y_true
-    return F.l1_loss(y_pred[..., :8], y_true[..., :8], reduction='none')
+    # return F.l1_loss(y_pred[..., :8], y_true[..., :8], reduction='none')
+    return torch.mean((y_pred[..., :8] - y_true[..., :8]).abs(), dim=-1)
 
 def huber_loss(y_true, y_pred):
     # do not consider mass targets in y_true

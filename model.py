@@ -4,7 +4,7 @@ import pytorch_lightning as L
 
 from layers import SelfAttentionBlock, CrossAttentionBlock, WBosonFourVectorLayer, Standardization
 from losses import (
-    huber_loss, neg_r2_loss, w_mass_mae_losses, w_mass_mmd_losses,
+    mae_loss, neg_r2_loss, w_mass_mae_losses, w_mass_mmd_losses,
     higgs_mass_loss, nu_mass_loss, aux_mom_mmd_loss, alpha_loss
 )
 
@@ -123,7 +123,7 @@ class LightningWAttention(L.LightningModule):
             num_self_attn=num_self_attn, num_cross_attn=num_cross_attn
         )
         defaults = {
-            "huber": 1.0,
+            "mae": 1.0,
             "higgs_mass": 0.0,
             "w0_mass_mae": 0.0, "w1_mass_mae": 0.0,
             "alpha": 0.0,
@@ -140,13 +140,12 @@ class LightningWAttention(L.LightningModule):
         return self.model(x)
 
     def _compute_losses(self, x, y, y_pred):
-        # Compute tuple-returning losses once to avoid redundant calls
         w_mass_mmd  = w_mass_mmd_losses(y, y_pred)
         aux_mom_mmd = aux_mom_mmd_loss(y, y_pred, self.current_epoch)
         w_mass_mae  = w_mass_mae_losses(y, y_pred)
 
         losses = {
-            "huber":        huber_loss(y, y_pred),
+            "mae":          mae_loss(y, y_pred),
             "higgs_mass":   higgs_mass_loss(y_pred),
             "w_mass_mmd0":  w_mass_mmd[0],
             "w_mass_mmd1":  w_mass_mmd[1],
@@ -160,46 +159,56 @@ class LightningWAttention(L.LightningModule):
             "w1_mass_mae":  w_mass_mae[1],
         }
         reduced = {k: v.mean() for k, v in losses.items()}
+        total = sum(self.loss_weights[k] * reduced[k] for k in self.loss_weights)
+        
+        return total, reduced
+
+    def _compute_swap_losses(self, x, y, y_pred):
+        # only consider localzied losses for swap decision
+        losses = {
+            "mae":          mae_loss(y, y_pred),
+            "higgs_mass":   higgs_mass_loss(y_pred),
+            "alpha":        alpha_loss(x, y, y_pred),
+        }
         cls_cri = (
-            self.loss_weights["huber"]       * reduced["huber"] +
-            self.loss_weights["higgs_mass"]  * reduced["higgs_mass"] +
-            self.loss_weights["alpha"]       * reduced["alpha"]
+            self.loss_weights["mae"]        * losses["mae"] +
+            self.loss_weights["higgs_mass"] * losses["higgs_mass"] +
+            self.loss_weights["alpha"]      * losses["alpha"]
         )
-        return reduced, cls_cri
+        return cls_cri
 
     def _shared_step(self, batch):
         x, y = batch
         y_pred, swap_y_pred = self(x)
-        losses,      cls_cri      = self._compute_losses(x, y, y_pred)
-        swap_losses, swap_cls_cri = self._compute_losses(x, y, swap_y_pred)
+
+        cls_cri = self._compute_swap_losses(x, y, y_pred)
+        swap_cls_cri = self._compute_swap_losses(x, y, swap_y_pred)
 
         use_swap = swap_cls_cri < cls_cri
-        total = torch.where(
-            use_swap,
-            sum(self.loss_weights[k] * v for k, v in swap_losses.items()),
-            sum(self.loss_weights[k] * v for k, v in losses.items()),
-        )
-        merged = {k: torch.where(use_swap, swap_losses[k], losses[k]) for k in losses}
-        return merged, total
+        sel_y_pred = torch.where(use_swap.unsqueeze(-1), swap_y_pred, y_pred)
 
-    def _log_losses(self, prefix, losses, total):
+        total, losses = self._compute_losses(x, y, sel_y_pred)
+        
+        return total, losses
+
+    def _log_losses(self, prefix, total, losses):
         self.log(f"{prefix}loss", total.detach(), prog_bar=True, on_step=False, on_epoch=True)
         for k, v in losses.items():
             self.log(f"{prefix}{k}_loss", v.detach(), prog_bar=False, on_step=False, on_epoch=True)
 
     def training_step(self, batch, batch_idx):
-        losses, total = self._shared_step(batch)
-        self._log_losses("", losses, total)
+        total, losses = self._shared_step(batch)
+        self._log_losses("", total, losses)
         return total
 
     def validation_step(self, batch, batch_idx):
-        losses, total = self._shared_step(batch)
-        self._log_losses("val_", losses, total)
+        total, losses = self._shared_step(batch)
+        self._log_losses("val_", total, losses)
         return total
 
     def test_step(self, batch, batch_idx):
-        losses, total = self._shared_step(batch)
-        self._log_losses("test_", losses, total)
+        total, losses = self._shared_step(batch)
+        self._log_losses("test_", total, losses)
         return total
 
     def configure_optimizers(self):
